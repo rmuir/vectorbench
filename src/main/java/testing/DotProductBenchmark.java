@@ -108,7 +108,7 @@ public class DotProductBenchmark {
     return res;
   }
 
-  //@Benchmark
+  @Benchmark
   public float dotProductOld() {
     if (a.length != b.length) {
       throw new IllegalArgumentException("vector dimensions differ: " + a.length + "!=" + b.length);
