@@ -22,9 +22,10 @@ public class DotProductBenchmark {
   private float[] a;
   private float[] b;
 
-  @Param({"1", "4", "6", "8", "13", "16", "25", "32", "64", "100", "128", "207", "256", "300", "512", "702", "1024"})
+  //@Param({"1", "4", "6", "8", "13", "16", "25", "32", "64", "100", "128", "207", "256", "300", "512", "702", "1024"})
   //@Param({"1", "4", "6", "8", "13", "16", "25", "32", "64", "100" })
   //@Param({"1024"})
+  @Param({"32", "64", "128", "256", "512", "1024"})
   int size;
 
   @Setup(Level.Trial)
@@ -46,8 +47,8 @@ public class DotProductBenchmark {
     }
     int i = 0;
     float res = 0;
-    // if the array size is large (2x platform vector size), its worth the overhead to vectorize
-    if (a.length >= 2 * SPECIES.length()) {
+    // if the array size is large (16x platform vector size), its worth the overhead to really unroll
+    if (a.length >= 16 * SPECIES.length()) {
       // vector loop is unrolled 4x (4 accumulators in parallel)
       FloatVector acc1 = FloatVector.zero(SPECIES);
       FloatVector acc2 = FloatVector.zero(SPECIES);
@@ -69,16 +70,20 @@ public class DotProductBenchmark {
         acc4 = acc4.add(vg.mul(vh));
       }
       res += acc1.reduceLanes(VectorOperators.ADD) + acc2.reduceLanes(VectorOperators.ADD) + acc3.reduceLanes(VectorOperators.ADD) + acc4.reduceLanes(VectorOperators.ADD);
-
-      // cleanup remainder
-      upperBound = SPECIES.loopBound(a.length);
-      acc1 = FloatVector.zero(SPECIES);
-      for (; i < upperBound; i += SPECIES.length()) {
+    } else if (a.length >= 2 * SPECIES.length()) {
+      // vector loop is unrolled 2x (2 accumulators in parallel)
+      FloatVector acc1 = FloatVector.zero(SPECIES);
+      FloatVector acc2 = FloatVector.zero(SPECIES);
+      int upperBound = SPECIES.loopBound(a.length - SPECIES.length());
+      for (; i < upperBound; i += 2 * SPECIES.length()) {
         FloatVector va = FloatVector.fromArray(SPECIES, a, i);
         FloatVector vb = FloatVector.fromArray(SPECIES, b, i);
         acc1 = acc1.add(va.mul(vb));
+        FloatVector vc = FloatVector.fromArray(SPECIES, a, i + SPECIES.length());
+        FloatVector vd = FloatVector.fromArray(SPECIES, b, i + SPECIES.length());
+        acc2 = acc2.add(vc.mul(vd));
       }
-      res += acc1.reduceLanes(VectorOperators.ADD);
+      res += acc1.reduceLanes(VectorOperators.ADD) + acc2.reduceLanes(VectorOperators.ADD);
     }
 
     for (; i < a.length; i++) {
