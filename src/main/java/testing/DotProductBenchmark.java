@@ -24,7 +24,8 @@ public class DotProductBenchmark {
 
   @Param({"1", "4", "6", "8", "13", "16", "25", "32", "64", "100", "128", "207", "256", "300", "512", "702", "1024"})
   //@Param({"1", "4", "6", "8", "13", "16", "25", "32", "64", "100" })
-  //@Param({"1024"})
+  //@Param({"702", "1024"})
+  //@Param({"16", "32", "64"})
   int size;
 
   @Setup(Level.Trial)
@@ -46,8 +47,8 @@ public class DotProductBenchmark {
     }
     int i = 0;
     float res = 0;
-    // if the array size is large (4x platform vector size), its worth the overhead to really unroll
-    if (a.length >= 4 * SPECIES.length()) {
+    // if the array size is large (> 2x platform vector size), its worth the overhead to vectorize
+    if (a.length > 2 * SPECIES.length()) {
       // vector loop is unrolled 4x (4 accumulators in parallel)
       FloatVector acc1 = FloatVector.zero(SPECIES);
       FloatVector acc2 = FloatVector.zero(SPECIES);
@@ -68,6 +69,14 @@ public class DotProductBenchmark {
         FloatVector vh = FloatVector.fromArray(SPECIES, b, i + 3*SPECIES.length());
         acc4 = acc4.add(vg.mul(vh));
       }
+      // vector tail: less scalar computations for unaligned sizes, esp with big vector sizes
+      upperBound = SPECIES.loopBound(a.length);
+      for (; i < upperBound; i += SPECIES.length()) {
+        FloatVector va = FloatVector.fromArray(SPECIES, a, i);
+        FloatVector vb = FloatVector.fromArray(SPECIES, b, i);
+        acc1 = acc1.add(va.mul(vb));
+      }
+      // reduce
       FloatVector res1 = acc1.add(acc2);
       FloatVector res2 = acc3.add(acc4);
       res += res1.add(res2).reduceLanes(VectorOperators.ADD);
