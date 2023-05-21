@@ -47,8 +47,8 @@ public class DotProductBenchmark {
     int i = 0;
     float res = 0;
     // if the array size is large (2x platform vector size), its worth the overhead to vectorize
-    // vector loop is unrolled a single time (2 accumulators in parallel)
-    if (a.length >= 4 * SPECIES.length()) {
+    if (a.length >= 2 * SPECIES.length()) {
+      // vector loop is unrolled 4x (4 accumulators in parallel)
       FloatVector acc1 = FloatVector.zero(SPECIES);
       FloatVector acc2 = FloatVector.zero(SPECIES);
       FloatVector acc3 = FloatVector.zero(SPECIES);
@@ -69,7 +69,18 @@ public class DotProductBenchmark {
         acc4 = acc4.add(vg.mul(vh));
       }
       res += acc1.reduceLanes(VectorOperators.ADD) + acc2.reduceLanes(VectorOperators.ADD) + acc3.reduceLanes(VectorOperators.ADD) + acc4.reduceLanes(VectorOperators.ADD);
+
+      // cleanup remainder
+      upperBound = SPECIES.loopBound(a.length);
+      acc1 = FloatVector.zero(SPECIES);
+      for (; i < upperBound; i += SPECIES.length()) {
+        FloatVector va = FloatVector.fromArray(SPECIES, a, i);
+        FloatVector vb = FloatVector.fromArray(SPECIES, b, i);
+        acc1 = acc1.add(va.mul(vb));
+      }
+      res += acc1.reduceLanes(VectorOperators.ADD);
     }
+
     for (; i < a.length; i++) {
       res += b[i] * a[i];
     }
