@@ -40,6 +40,43 @@ public class DotProductBenchmark {
   static final VectorSpecies<Float> SPECIES = FloatVector.SPECIES_PREFERRED;
 
   @Benchmark
+  public float dotProductNewNew() {
+    if (a.length != b.length) {
+      throw new IllegalArgumentException("vector dimensions differ: " + a.length + "!=" + b.length);
+    }
+    int i = 0;
+    float res = 0;
+    // if the array size is large (2x platform vector size), its worth the overhead to vectorize
+    // vector loop is unrolled a single time (2 accumulators in parallel)
+    if (a.length >= 4 * SPECIES.length()) {
+      FloatVector acc1 = FloatVector.zero(SPECIES);
+      FloatVector acc2 = FloatVector.zero(SPECIES);
+      FloatVector acc3 = FloatVector.zero(SPECIES);
+      FloatVector acc4 = FloatVector.zero(SPECIES);
+      int upperBound = SPECIES.loopBound(a.length - 3*SPECIES.length());
+      for (; i < upperBound; i += 4 * SPECIES.length()) {
+        FloatVector va = FloatVector.fromArray(SPECIES, a, i);
+        FloatVector vb = FloatVector.fromArray(SPECIES, b, i);
+        acc1 = acc1.add(va.mul(vb));
+        FloatVector vc = FloatVector.fromArray(SPECIES, a, i + SPECIES.length());
+        FloatVector vd = FloatVector.fromArray(SPECIES, b, i + SPECIES.length());
+        acc2 = acc2.add(vc.mul(vd));
+        FloatVector ve = FloatVector.fromArray(SPECIES, a, i + 2*SPECIES.length());
+        FloatVector vf = FloatVector.fromArray(SPECIES, b, i + 2*SPECIES.length());
+        acc3 = acc3.add(ve.mul(vf));
+        FloatVector vg = FloatVector.fromArray(SPECIES, a, i + 3*SPECIES.length());
+        FloatVector vh = FloatVector.fromArray(SPECIES, b, i + 3*SPECIES.length());
+        acc4 = acc4.add(vg.mul(vh));
+      }
+      res += acc1.reduceLanes(VectorOperators.ADD) + acc2.reduceLanes(VectorOperators.ADD) + acc3.reduceLanes(VectorOperators.ADD) + acc4.reduceLanes(VectorOperators.ADD);
+    }
+    for (; i < a.length; i++) {
+      res += b[i] * a[i];
+    }
+    return res;
+  }
+
+  @Benchmark
   public float dotProductNew() {
     if (a.length != b.length) {
       throw new IllegalArgumentException("vector dimensions differ: " + a.length + "!=" + b.length);
