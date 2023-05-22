@@ -12,6 +12,7 @@ import jdk.incubator.vector.ShortVector;
 import jdk.incubator.vector.IntVector;
 import jdk.incubator.vector.VectorOperators;
 import jdk.incubator.vector.VectorSpecies;
+import jdk.incubator.vector.VectorShape;
 import jdk.incubator.vector.Vector;
 
 @BenchmarkMode(Mode.Throughput)
@@ -38,8 +39,43 @@ public class BinaryDotProductBenchmark {
     ThreadLocalRandom.current().nextBytes(a);
     ThreadLocalRandom.current().nextBytes(b);
     if (dotProductNew() != dotProductOld()) {
-      throw new RuntimeException("wrong");
+      throw new RuntimeException("New is wrong");
     }
+    if (dotProductNewNew() != dotProductOld()) {
+      throw new RuntimeException("NewNew is wrong");
+    }
+  }
+
+  static final VectorSpecies<Byte> PREFERRED_BYTE_SPECIES = ByteVector.SPECIES_MAX.withShape(VectorShape.forBitSize(ShortVector.SPECIES_PREFERRED.vectorBitSize() >> 1));
+
+  @Benchmark
+  public int dotProductNewNew() {
+    int i = 0;
+    int res = 0;
+    // only vectorize if we'll at least enter the loop a single time
+    if (a.length >= PREFERRED_BYTE_SPECIES.length()) {
+      int upperBound = PREFERRED_BYTE_SPECIES.loopBound(a.length);
+      IntVector acc1 = IntVector.zero(IntVector.SPECIES_PREFERRED);
+      IntVector acc2 = IntVector.zero(IntVector.SPECIES_PREFERRED);
+      for (; i < upperBound; i += PREFERRED_BYTE_SPECIES.length()) {
+          ByteVector va8 = ByteVector.fromArray(PREFERRED_BYTE_SPECIES, a, i);
+          ByteVector vb8 = ByteVector.fromArray(PREFERRED_BYTE_SPECIES, b, i);
+          Vector<Short> va16 = va8.convertShape(VectorOperators.B2S, ShortVector.SPECIES_PREFERRED, 0);
+          Vector<Short> vb16 = vb8.convertShape(VectorOperators.B2S, ShortVector.SPECIES_PREFERRED, 0);
+          Vector<Short> prod16 = va16.mul(vb16);
+          Vector<Integer> prod32_1 = prod16.convertShape(VectorOperators.S2I, IntVector.SPECIES_PREFERRED, 0);
+          Vector<Integer> prod32_2 = prod16.convertShape(VectorOperators.S2I, IntVector.SPECIES_PREFERRED, 1);
+          acc1 = acc1.add(prod32_1);
+          acc2 = acc2.add(prod32_2);
+      }
+      // reduce
+      res += acc1.add(acc2).reduceLanes(VectorOperators.ADD);
+    }
+
+    for (; i < a.length; i++) {
+      res += b[i] * a[i];
+    }
+    return res;
   }
 
   @Benchmark
