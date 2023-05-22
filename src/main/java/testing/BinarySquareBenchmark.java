@@ -99,7 +99,7 @@ public class BinarySquareBenchmark {
           Vector<Integer> diff32_1 = diff16.convertShape(VectorOperators.S2I, IntVector.SPECIES_128, 0);
           Vector<Integer> diff32_2 = diff16.convertShape(VectorOperators.S2I, IntVector.SPECIES_128, 1);
           acc1 = acc1.add(diff32_1.mul(diff32_1));
-          acc2 = acc2.add(diff32_2.mul(diff32_1));
+          acc2 = acc2.add(diff32_2.mul(diff32_2));
         }
         // reduce
         res += acc1.add(acc2).reduceLanes(VectorOperators.ADD);
