@@ -87,19 +87,18 @@ public class BinaryDotProductBenchmark {
         // reduce
         res += acc.reduceLanes(VectorOperators.ADD);
       } else {
-        // 128-bit implementation
-        // generic implementation, which must "split up" vectors due to widening conversions
+        // 128-bit implementation, which must "split up" vectors due to widening conversions
         int upperBound = ByteVector.SPECIES_64.loopBound(a.length);
         IntVector acc1 = IntVector.zero(IntVector.SPECIES_128);
         IntVector acc2 = IntVector.zero(IntVector.SPECIES_128);
         for (; i < upperBound; i += ByteVector.SPECIES_64.length()) {
           ByteVector va8 = ByteVector.fromArray(ByteVector.SPECIES_64, a, i);
           ByteVector vb8 = ByteVector.fromArray(ByteVector.SPECIES_64, b, i);
-          // split each byte vector into two short vectors and multiply
+          // expand each byte vector into short vector and multiply
           Vector<Short> va16 = va8.convertShape(VectorOperators.B2S, ShortVector.SPECIES_128, 0);
           Vector<Short> vb16 = vb8.convertShape(VectorOperators.B2S, ShortVector.SPECIES_128, 0);
           Vector<Short> prod16 = va16.mul(vb16);
-          // expand each short vector into two int vectors and add
+          // split each short vector into two int vectors and add
           Vector<Integer> prod32_1 = prod16.convertShape(VectorOperators.S2I, IntVector.SPECIES_128, 0);
           Vector<Integer> prod32_2 = prod16.convertShape(VectorOperators.S2I, IntVector.SPECIES_128, 1);
           acc1 = acc1.add(prod32_1);
