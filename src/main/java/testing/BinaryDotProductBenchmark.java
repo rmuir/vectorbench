@@ -41,12 +41,9 @@ public class BinaryDotProductBenchmark {
     if (dotProductNew() != dotProductOld()) {
       throw new RuntimeException("New is wrong");
     }
-    if (dotProductNewNew() != dotProductOld()) {
-      throw new RuntimeException("NewNew is wrong");
-    }
   }
 
-  static final VectorSpecies<Byte> PREFERRED_BYTE_SPECIES;
+  static final VectorSpecies<Byte>  PREFERRED_BYTE_SPECIES;
   static final VectorSpecies<Short> PREFERRED_SHORT_SPECIES;
   static {
     if (IntVector.SPECIES_PREFERRED.vectorBitSize() >= 256) {
@@ -59,7 +56,7 @@ public class BinaryDotProductBenchmark {
   }
 
   @Benchmark
-  public int dotProductNewNew() {
+  public int dotProductNew() {
     int i = 0;
     int res = 0;
     final int vectorSize = IntVector.SPECIES_PREFERRED.vectorBitSize();
@@ -95,64 +92,6 @@ public class BinaryDotProductBenchmark {
           ByteVector va8 = ByteVector.fromArray(ByteVector.SPECIES_64, a, i);
           ByteVector vb8 = ByteVector.fromArray(ByteVector.SPECIES_64, b, i);
           // expand each byte vector into short vector and multiply
-          Vector<Short> va16 = va8.convertShape(VectorOperators.B2S, ShortVector.SPECIES_128, 0);
-          Vector<Short> vb16 = vb8.convertShape(VectorOperators.B2S, ShortVector.SPECIES_128, 0);
-          Vector<Short> prod16 = va16.mul(vb16);
-          // split each short vector into two int vectors and add
-          Vector<Integer> prod32_1 = prod16.convertShape(VectorOperators.S2I, IntVector.SPECIES_128, 0);
-          Vector<Integer> prod32_2 = prod16.convertShape(VectorOperators.S2I, IntVector.SPECIES_128, 1);
-          acc1 = acc1.add(prod32_1);
-          acc2 = acc2.add(prod32_2);
-        }
-        // reduce
-        res += acc1.add(acc2).reduceLanes(VectorOperators.ADD);
-      }
-    }
-
-    for (; i < a.length; i++) {
-      res += b[i] * a[i];
-    }
-    return res;
-  }
-
-  @Benchmark
-  public int dotProductNew() {
-    int i = 0;
-    int res = 0;
-    final int vectorSize = IntVector.SPECIES_PREFERRED.vectorBitSize();
-    // only vectorize if we'll at least enter the loop a single time, and we have at least 128-bit vectors
-    if (a.length >= ByteVector.SPECIES_64.length() && vectorSize >= 128) {
-      // compute vectorized dot product consistent with VPDPBUSD instruction, acts like:
-      // int sum = 0;
-      // for (...) {
-      //   short product = (short) (x[i] * y[i]);
-      //   sum += product;
-      // }
-      if (vectorSize >= 256) {
-        // optimized 256 bit implementation, processes 8 bytes at a time
-        int upperBound = ByteVector.SPECIES_64.loopBound(a.length);
-        IntVector acc = IntVector.zero(IntVector.SPECIES_256);
-        for (; i < upperBound; i += ByteVector.SPECIES_64.length()) {
-          ByteVector va8 = ByteVector.fromArray(ByteVector.SPECIES_64, a, i);
-          ByteVector vb8 = ByteVector.fromArray(ByteVector.SPECIES_64, b, i);
-          Vector<Short> va16 = va8.convertShape(VectorOperators.B2S, ShortVector.SPECIES_128, 0);
-          Vector<Short> vb16 = vb8.convertShape(VectorOperators.B2S, ShortVector.SPECIES_128, 0);
-          Vector<Short> prod16 = va16.mul(vb16);
-          Vector<Integer> prod32 = prod16.convertShape(VectorOperators.S2I, IntVector.SPECIES_256, 0);
-          acc = acc.add(prod32);
-        }
-        // reduce
-        res += acc.reduceLanes(VectorOperators.ADD);
-      } else {
-        // 128-bit implementation
-        // generic implementation, which must "split up" vectors due to widening conversions
-        int upperBound = ByteVector.SPECIES_64.loopBound(a.length);
-        IntVector acc1 = IntVector.zero(IntVector.SPECIES_PREFERRED);
-        IntVector acc2 = IntVector.zero(IntVector.SPECIES_PREFERRED);
-        for (; i < upperBound; i += ByteVector.SPECIES_64.length()) {
-          ByteVector va8 = ByteVector.fromArray(ByteVector.SPECIES_64, a, i);
-          ByteVector vb8 = ByteVector.fromArray(ByteVector.SPECIES_64, b, i);
-          // split each byte vector into two short vectors and multiply
           Vector<Short> va16 = va8.convertShape(VectorOperators.B2S, ShortVector.SPECIES_128, 0);
           Vector<Short> vb16 = vb8.convertShape(VectorOperators.B2S, ShortVector.SPECIES_128, 0);
           Vector<Short> prod16 = va16.mul(vb16);
