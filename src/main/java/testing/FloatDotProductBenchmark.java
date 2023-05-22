@@ -17,7 +17,7 @@ import jdk.incubator.vector.VectorSpecies;
 @Warmup(iterations = 3, time = 3)
 @Measurement(iterations = 5, time = 3)
 @Fork(value = 1, jvmArgsPrepend = {"--add-modules=jdk.incubator.vector"})
-public class DotProductBenchmark {
+public class FloatDotProductBenchmark {
 
   private float[] a;
   private float[] b;
