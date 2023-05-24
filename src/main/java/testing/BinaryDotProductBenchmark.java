@@ -32,6 +32,9 @@ public class BinaryDotProductBenchmark {
   //@Param({"16", "32", "64"})
   int size;
 
+  private static final boolean IS_AMD64_WITHOUT_AVX2 =
+      System.getProperty("os.arch").equals("amd64") && IntVector.SPECIES_PREFERRED.vectorBitSize() < 256;
+
   @Setup(Level.Trial)
   public void init() {
     a = new byte[size];
@@ -61,7 +64,7 @@ public class BinaryDotProductBenchmark {
     int res = 0;
     final int vectorSize = IntVector.SPECIES_PREFERRED.vectorBitSize();
     // only vectorize if we'll at least enter the loop a single time, and we have at least 128-bit vectors
-    if (a.length >= 16 && vectorSize >= 128) {
+    if (a.length >= 16 && vectorSize >= 128 && IS_AMD64_WITHOUT_AVX2 == false) {
       // compute vectorized dot product consistent with VPDPBUSD instruction, acts like:
       // int sum = 0;
       // for (...) {

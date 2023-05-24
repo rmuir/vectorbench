@@ -55,6 +55,9 @@ public class BinaryCosineBenchmark {
     }
   }
 
+  private static final boolean IS_AMD64_WITHOUT_AVX2 =
+    System.getProperty("os.arch").equals("amd64") && IntVector.SPECIES_PREFERRED.vectorBitSize() < 256;
+
   @Benchmark
   public float cosineDistanceNew() {
     int i = 0;
@@ -63,7 +66,7 @@ public class BinaryCosineBenchmark {
     int norm2 = 0;
     final int vectorSize = IntVector.SPECIES_PREFERRED.vectorBitSize();
     // only vectorize if we'll at least enter the loop a single time, and we have at least 128-bit vectors
-    if (a.length >= 16 && vectorSize >= 128) {
+    if (a.length >= 16 && vectorSize >= 128 && IS_AMD64_WITHOUT_AVX2 == false) {
       // acts like:
       // int sum = 0;
       // for (...) {
