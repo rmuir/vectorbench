@@ -2,25 +2,36 @@ package testing;
 
 import org.openjdk.jmh.annotations.*;
 
-import java.util.concurrent.atomic.AtomicInteger;
+import java.io.IOException;
+import java.lang.foreign.Arena;
+import java.lang.foreign.MemorySegment;
+import java.lang.foreign.ValueLayout;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.channels.FileChannel;
+import java.nio.file.Path;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.IntStream;
 
 import jdk.incubator.vector.FloatVector;
 import jdk.incubator.vector.VectorOperators;
 import jdk.incubator.vector.VectorSpecies;
+
+import static java.nio.ByteOrder.LITTLE_ENDIAN;
+import static java.nio.file.StandardOpenOption.*;
 
 @BenchmarkMode(Mode.Throughput)
 @OutputTimeUnit(TimeUnit.MICROSECONDS)
 @State(Scope.Benchmark)
 @Warmup(iterations = 3, time = 3)
 @Measurement(iterations = 5, time = 3)
-@Fork(value = 1, jvmArgsPrepend = {"--add-modules=jdk.incubator.vector"})
+@Fork(value = 1, jvmArgsPrepend = {"--add-modules=jdk.incubator.vector", "--enable-preview"})
 public class FloatDotProductBenchmark {
 
   private float[] a;
   private float[] b;
+
+  private MemorySegment segment;
 
   @Param({"1", "4", "6", "8", "13", "16", "25", "32", "64", "100", "128", "207", "256", "300", "512", "702", "1024"})
   //@Param({"1", "4", "6", "8", "13", "16", "25", "32", "64", "100" })
@@ -29,19 +40,49 @@ public class FloatDotProductBenchmark {
   int size;
 
   @Setup(Level.Trial)
-  public void init() {
+  public void init() throws IOException {
+    float[] tmpA = new float[size];
+    float[] tmpB = new float[size];
+    for (int i = 0; i < size; ++i) {
+      tmpA[i] = ThreadLocalRandom.current().nextFloat();
+      tmpB[i] = ThreadLocalRandom.current().nextFloat();
+    }
+    Path p = Path.of("vector.data");
+    try (FileChannel fc = FileChannel.open(p, CREATE, READ, WRITE)) {
+      ByteBuffer buf = ByteBuffer.allocate(size * 2 * Float.BYTES);
+      buf.order(LITTLE_ENDIAN);
+      buf.asFloatBuffer().put(0, tmpA);
+      buf.asFloatBuffer().put(size, tmpB);
+      int n = fc.write(buf);
+      assert n == size * 2 * Float.BYTES;
+
+      Arena arena = Arena.openShared();
+      segment = fc.map(FileChannel.MapMode.READ_ONLY, 0, size * 2L * Float.BYTES, arena.scope());
+    }
+
+    // Thread local buffers
     a = new float[size];
     b = new float[size];
-    for (int i = 0; i < size; ++i) {
-      a[i] = ThreadLocalRandom.current().nextFloat();
-      b[i] = ThreadLocalRandom.current().nextFloat();
+
+    float f1 = dotProductCopyFromArray();
+    float f2 = dotProductFromMemorySegment();
+    if (Math.abs(f1 - f2) > 0.0001) {
+      throw new AssertionError(f1 + " != " + f2);
     }
   }
 
   static final VectorSpecies<Float> SPECIES = FloatVector.SPECIES_PREFERRED;
 
+  static final ValueLayout.OfFloat LAYOUT_LE_FLOAT =
+          ValueLayout.JAVA_FLOAT_UNALIGNED.withOrder(ByteOrder.LITTLE_ENDIAN);
+
   @Benchmark
-  public float dotProductNew() {
+  public float dotProductCopyFromArray() {
+    // loads vector data from the backing memory segment into the float arrays,
+    // in the same way as that of Lucene's MemorySegmentIndexInput.
+    MemorySegment.copy(segment, LAYOUT_LE_FLOAT, 0, a, 0, size);
+    MemorySegment.copy(segment, LAYOUT_LE_FLOAT, (long) size * Float.BYTES, b, 0, size);
+
     if (a.length != b.length) {
       throw new IllegalArgumentException("vector dimensions differ: " + a.length + "!=" + b.length);
     }
@@ -84,6 +125,65 @@ public class FloatDotProductBenchmark {
 
     for (; i < a.length; i++) {
       res += b[i] * a[i];
+    }
+    return res;
+  }
+
+  @Benchmark
+  public float dotProductFromMemorySegment() {
+    return dotProductFromMemorySegment(0, size * Float.BYTES);
+  }
+
+  private float dotProductFromMemorySegment(long segmentOffset1, long segmentOffset2) {
+    // Here we are using a single memory segment that holds the data for both vectors.
+    // This is similar to what Lucene's MemorySegmentIndexInput would expose (rather
+    // than a segment per vector. since segments are immutable and we would not want
+    // the garbage).
+    if (segment.byteSize() < size * Float.BYTES * 2L) {
+      throw new IllegalArgumentException("segment too small");
+    }
+    int i = 0;
+    float res = 0;
+    // if the array size is large (> 2x platform vector size), its worth the overhead to vectorize
+    final int length = size; // good enough for benching, but this would be passed
+    if (length > 2 * SPECIES.length()) {
+      // vector loop is unrolled 4x (4 accumulators in parallel)
+      FloatVector acc1 = FloatVector.zero(SPECIES);
+      FloatVector acc2 = FloatVector.zero(SPECIES);
+      FloatVector acc3 = FloatVector.zero(SPECIES);
+      FloatVector acc4 = FloatVector.zero(SPECIES);
+      int upperBound = SPECIES.loopBound(length - 3*SPECIES.length());
+      for (; i < upperBound; i += 4 * SPECIES.length()) {
+        // int offset = SPECIES.length() * Float.BYTES;
+        FloatVector va = FloatVector.fromMemorySegment(SPECIES, segment, segmentOffset1 + i * Float.BYTES, LITTLE_ENDIAN);
+        FloatVector vb = FloatVector.fromMemorySegment(SPECIES, segment, segmentOffset2 + i * Float.BYTES, LITTLE_ENDIAN);
+        acc1 = acc1.add(va.mul(vb));
+        FloatVector vc = FloatVector.fromMemorySegment(SPECIES, segment, segmentOffset1 + (i + SPECIES.length()) * Float.BYTES, LITTLE_ENDIAN);
+        FloatVector vd = FloatVector.fromMemorySegment(SPECIES, segment, segmentOffset2 + (i + SPECIES.length()) * Float.BYTES, LITTLE_ENDIAN);
+        acc2 = acc2.add(vc.mul(vd));
+        FloatVector ve = FloatVector.fromMemorySegment(SPECIES, segment, segmentOffset1 + (i + 2*SPECIES.length()) * Float.BYTES, LITTLE_ENDIAN);
+        FloatVector vf = FloatVector.fromMemorySegment(SPECIES, segment, segmentOffset2 +(i + 2*SPECIES.length()) * Float.BYTES, LITTLE_ENDIAN);
+        acc3 = acc3.add(ve.mul(vf));
+        FloatVector vg = FloatVector.fromMemorySegment(SPECIES, segment, segmentOffset1 + (i + 3*SPECIES.length()) * Float.BYTES, LITTLE_ENDIAN);
+        FloatVector vh = FloatVector.fromMemorySegment(SPECIES, segment, segmentOffset2 + (i + 3*SPECIES.length()) * Float.BYTES, LITTLE_ENDIAN);
+        acc4 = acc4.add(vg.mul(vh));
+      }
+      // vector tail: less scalar computations for unaligned sizes, esp with big vector sizes
+      upperBound = SPECIES.loopBound(length);
+      for (; i < upperBound; i += SPECIES.length()) {
+        FloatVector va = FloatVector.fromMemorySegment(SPECIES, segment, segmentOffset1 + i * Float.BYTES, LITTLE_ENDIAN);
+        FloatVector vb = FloatVector.fromMemorySegment(SPECIES, segment, segmentOffset2 + i * Float.BYTES, LITTLE_ENDIAN);
+        acc1 = acc1.add(va.mul(vb));
+      }
+      // reduce
+      FloatVector res1 = acc1.add(acc2);
+      FloatVector res2 = acc3.add(acc4);
+      res += res1.add(res2).reduceLanes(VectorOperators.ADD);
+    }
+
+    // tail
+    for (; i < length; i++) {
+      res += segment.get(LAYOUT_LE_FLOAT, segmentOffset2 + i * Float.BYTES) * segment.get(LAYOUT_LE_FLOAT, segmentOffset1 + i * Float.BYTES);
     }
     return res;
   }
