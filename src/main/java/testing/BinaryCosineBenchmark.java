@@ -59,6 +59,84 @@ public class BinaryCosineBenchmark {
     System.getProperty("os.arch").equals("amd64") && IntVector.SPECIES_PREFERRED.vectorBitSize() < 256;
 
   @Benchmark
+  public float cosineDistanceNewNew() {
+    int i = 0;
+    int sum = 0;
+    int norm1 = 0;
+    int norm2 = 0;
+    final int vectorSize = IntVector.SPECIES_PREFERRED.vectorBitSize();
+    // only vectorize if we'll at least enter the loop a single time, and we have at least 128-bit vectors
+    if (a.length >= 16 && vectorSize >= 128 && IS_AMD64_WITHOUT_AVX2 == false) {
+      if (vectorSize >= 256) {
+        // optimized 256/512 bit implementation, processes 8/16 bytes at a time
+        int upperBound = PREFERRED_BYTE_SPECIES.loopBound(a.length);
+        IntVector accSum = IntVector.zero(IntVector.SPECIES_PREFERRED);
+        IntVector accNorm1 = IntVector.zero(IntVector.SPECIES_PREFERRED);
+        IntVector accNorm2 = IntVector.zero(IntVector.SPECIES_PREFERRED);
+        for (; i < upperBound; i += PREFERRED_BYTE_SPECIES.length()) {
+          ByteVector va8 = ByteVector.fromArray(PREFERRED_BYTE_SPECIES, a, i);
+          ByteVector vb8 = ByteVector.fromArray(PREFERRED_BYTE_SPECIES, b, i);
+          // widen to 32-bits, square, multiply, and add
+          Vector<Integer> va32 = va8.convertShape(VectorOperators.B2I, IntVector.SPECIES_PREFERRED, 0);
+          accNorm1 = accNorm1.add(va32.mul(va32));
+          Vector<Integer> vb32 = vb8.convertShape(VectorOperators.B2I, IntVector.SPECIES_PREFERRED, 0);
+          accNorm2 = accNorm2.add(vb32.mul(vb32));
+          accSum = accSum.add(va32.mul(vb32));
+        }
+        // reduce
+        sum += accSum.reduceLanes(VectorOperators.ADD);
+        norm1 += accNorm1.reduceLanes(VectorOperators.ADD);
+        norm2 += accNorm2.reduceLanes(VectorOperators.ADD);
+      } else {
+        // 128-bit implementation, which must "split up" vectors due to widening conversions
+        int upperBound = ByteVector.SPECIES_64.loopBound(a.length);
+        IntVector accSum1 = IntVector.zero(IntVector.SPECIES_128);
+        IntVector accSum2 = IntVector.zero(IntVector.SPECIES_128);
+        IntVector accNorm1_1 = IntVector.zero(IntVector.SPECIES_128);
+        IntVector accNorm1_2 = IntVector.zero(IntVector.SPECIES_128);
+        IntVector accNorm2_1 = IntVector.zero(IntVector.SPECIES_128);
+        IntVector accNorm2_2 = IntVector.zero(IntVector.SPECIES_128);
+        for (; i < upperBound; i += ByteVector.SPECIES_64.length()) {
+          ByteVector va8 = ByteVector.fromArray(ByteVector.SPECIES_64, a, i);
+          ByteVector vb8 = ByteVector.fromArray(ByteVector.SPECIES_64, b, i);
+          // expand each byte vector into short vector and perform multiplications
+          Vector<Short> va16 = va8.convertShape(VectorOperators.B2S, ShortVector.SPECIES_128, 0);
+          Vector<Short> vb16 = vb8.convertShape(VectorOperators.B2S, ShortVector.SPECIES_128, 0);
+          Vector<Short> prod16 = va16.mul(vb16);
+          Vector<Short> norm1_16 = va16.mul(va16);
+          Vector<Short> norm2_16 = vb16.mul(vb16);
+          // split each short vector into two int vectors and add
+          Vector<Integer> prod32_1 = prod16.convertShape(VectorOperators.S2I, IntVector.SPECIES_128, 0);
+          Vector<Integer> prod32_2 = prod16.convertShape(VectorOperators.S2I, IntVector.SPECIES_128, 1);
+          Vector<Integer> norm1_32_1 = norm1_16.convertShape(VectorOperators.S2I, IntVector.SPECIES_128, 0);
+          Vector<Integer> norm1_32_2 = norm1_16.convertShape(VectorOperators.S2I, IntVector.SPECIES_128, 1);
+          Vector<Integer> norm2_32_1 = norm2_16.convertShape(VectorOperators.S2I, IntVector.SPECIES_128, 0);
+          Vector<Integer> norm2_32_2 = norm2_16.convertShape(VectorOperators.S2I, IntVector.SPECIES_128, 1);
+          accSum1 = accSum1.add(prod32_1);
+          accSum2 = accSum2.add(prod32_2);
+          accNorm1_1 = accNorm1_1.add(norm1_32_1);
+          accNorm1_2 = accNorm1_2.add(norm1_32_2);
+          accNorm2_1 = accNorm2_1.add(norm2_32_1);
+          accNorm2_2 = accNorm2_2.add(norm2_32_2);
+        }
+        // reduce
+        sum += accSum1.add(accSum2).reduceLanes(VectorOperators.ADD);
+        norm1 += accNorm1_1.add(accNorm1_2).reduceLanes(VectorOperators.ADD);
+        norm2 += accNorm2_1.add(accNorm2_2).reduceLanes(VectorOperators.ADD);
+      }
+    }
+
+    for (; i < a.length; i++) {
+      byte elem1 = a[i];
+      byte elem2 = b[i];
+      sum += elem1 * elem2;
+      norm1 += elem1 * elem1;
+      norm2 += elem2 * elem2;
+    }
+    return (float) (sum / Math.sqrt((double) norm1 * (double) norm2));
+  }
+
+  @Benchmark
   public float cosineDistanceNew() {
     int i = 0;
     int sum = 0;
