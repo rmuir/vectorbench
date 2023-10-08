@@ -86,12 +86,11 @@ public class BinaryDotProductBenchmark {
         // reduce
         res += acc.reduceLanes(VectorOperators.ADD);
       } else {
-        // 128-bit impl, which is tricky since we don't have SPECIES_32, it splits vectors up
-        int upperBound = ByteVector.SPECIES_128.loopBound(a.length);
-        IntVector acc = IntVector.zero(IntVector.SPECIES_128);
-        for (; i < upperBound; i += ByteVector.SPECIES_128.length()) {
-          ByteVector va8 = ByteVector.fromArray(ByteVector.SPECIES_128, a, i);
-          ByteVector vb8 = ByteVector.fromArray(ByteVector.SPECIES_128, b, i);
+        int upperBound = ByteVector.SPECIES_PREFERRED.loopBound(a.length);
+        IntVector acc = IntVector.zero(IntVector.SPECIES_PREFERRED);
+        for (; i < upperBound; i += ByteVector.SPECIES_PREFERRED.length()) {
+          ByteVector va8 = ByteVector.fromArray(ByteVector.SPECIES_PREFERRED, a, i);
+          ByteVector vb8 = ByteVector.fromArray(ByteVector.SPECIES_PREFERRED, b, i);
 
           // first half
           Vector<Short> va16_1 = va8.convert(VectorOperators.B2S, 0);
