@@ -59,63 +59,6 @@ public class BinarySquareBenchmark {
   }
 
   @Benchmark
-  public int squareDistanceNewNew() {
-    int i = 0;
-    int res = 0;
-    final int vectorSize = IntVector.SPECIES_PREFERRED.vectorBitSize();
-    // only vectorize if we'll at least enter the loop a single time, and we have at least 128-bit vectors
-    if (a.length >= 16 && vectorSize >= 128 && IS_AMD64_WITHOUT_AVX2 == false) {
-      // acts like:
-      // int sum = 0;
-      // for (...) {
-      //   short difference = (short) (x[i] - y[i]);
-      //   sum += (int) difference * (int) difference;
-      // }
-      if (vectorSize >= 256) {
-        // optimized 256/512 bit implementation, processes 8/16 bytes at a time
-        int upperBound = PREFERRED_BYTE_SPECIES.loopBound(a.length);
-        IntVector acc = IntVector.zero(IntVector.SPECIES_PREFERRED);
-        for (; i < upperBound; i += PREFERRED_BYTE_SPECIES.length()) {
-          ByteVector va8 = ByteVector.fromArray(PREFERRED_BYTE_SPECIES, a, i);
-          ByteVector vb8 = ByteVector.fromArray(PREFERRED_BYTE_SPECIES, b, i);
-          Vector<Integer> va32 = va8.convertShape(VectorOperators.B2I, IntVector.SPECIES_PREFERRED, 0);
-          Vector<Integer> vb32 = vb8.convertShape(VectorOperators.B2I, IntVector.SPECIES_PREFERRED, 0);
-          Vector<Integer> diff32 = va32.sub(vb32);
-          acc = acc.add(diff32.mul(diff32));
-        }
-        // reduce
-        res += acc.reduceLanes(VectorOperators.ADD);
-      } else {
-        // 128-bit implementation, which must "split up" vectors due to widening conversions
-        int upperBound = ByteVector.SPECIES_64.loopBound(a.length);
-        IntVector acc1 = IntVector.zero(IntVector.SPECIES_128);
-        IntVector acc2 = IntVector.zero(IntVector.SPECIES_128);
-        for (; i < upperBound; i += ByteVector.SPECIES_64.length()) {
-          ByteVector va8 = ByteVector.fromArray(ByteVector.SPECIES_64, a, i);
-          ByteVector vb8 = ByteVector.fromArray(ByteVector.SPECIES_64, b, i);
-          // expand each byte vector into short vector and subtract
-          Vector<Short> va16 = va8.convertShape(VectorOperators.B2S, ShortVector.SPECIES_128, 0);
-          Vector<Short> vb16 = vb8.convertShape(VectorOperators.B2S, ShortVector.SPECIES_128, 0);
-          Vector<Short> diff16 = va16.sub(vb16);
-          // split each short vector into two int vectors, square, and add
-          Vector<Integer> diff32_1 = diff16.convertShape(VectorOperators.S2I, IntVector.SPECIES_128, 0);
-          Vector<Integer> diff32_2 = diff16.convertShape(VectorOperators.S2I, IntVector.SPECIES_128, 1);
-          acc1 = acc1.add(diff32_1.mul(diff32_1));
-          acc2 = acc2.add(diff32_2.mul(diff32_2));
-        }
-        // reduce
-        res += acc1.add(acc2).reduceLanes(VectorOperators.ADD);
-      }
-    }
-
-    for (; i < a.length; i++) {
-      int diff = a[i] - b[i];
-      res += diff * diff;
-    }
-    return res;
-  }
-
-  @Benchmark
   public int squareDistanceNew() {
     int i = 0;
     int res = 0;

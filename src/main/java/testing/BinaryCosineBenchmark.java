@@ -76,12 +76,17 @@ public class BinaryCosineBenchmark {
         for (; i < upperBound; i += PREFERRED_BYTE_SPECIES.length()) {
           ByteVector va8 = ByteVector.fromArray(PREFERRED_BYTE_SPECIES, a, i);
           ByteVector vb8 = ByteVector.fromArray(PREFERRED_BYTE_SPECIES, b, i);
-          // widen to 32-bits, square, multiply, and add
-          Vector<Integer> va32 = va8.convertShape(VectorOperators.B2I, IntVector.SPECIES_PREFERRED, 0);
-          accNorm1 = accNorm1.add(va32.mul(va32));
-          Vector<Integer> vb32 = vb8.convertShape(VectorOperators.B2I, IntVector.SPECIES_PREFERRED, 0);
-          accNorm2 = accNorm2.add(vb32.mul(vb32));
-          accSum = accSum.add(va32.mul(vb32));
+          Vector<Short> va16 = va8.convertShape(VectorOperators.B2S, PREFERRED_SHORT_SPECIES, 0);
+          Vector<Short> vb16 = vb8.convertShape(VectorOperators.B2S, PREFERRED_SHORT_SPECIES, 0);
+          Vector<Short> prod16 = va16.mul(vb16);
+          Vector<Short> norm1_16 = va16.mul(va16);
+          Vector<Short> norm2_16 = vb16.mul(vb16);
+          Vector<Integer> prod32 = prod16.convertShape(VectorOperators.S2I, IntVector.SPECIES_PREFERRED, 0);
+          Vector<Integer> norm1_32 = norm1_16.convertShape(VectorOperators.S2I, IntVector.SPECIES_PREFERRED, 0);
+          Vector<Integer> norm2_32 = norm2_16.convertShape(VectorOperators.S2I, IntVector.SPECIES_PREFERRED, 0);
+          accSum = accSum.add(prod32);
+          accNorm1 = accNorm1.add(norm1_32);
+          accNorm2 = accNorm2.add(norm2_32);
         }
         // reduce
         sum += accSum.reduceLanes(VectorOperators.ADD);

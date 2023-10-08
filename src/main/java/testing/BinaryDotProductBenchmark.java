@@ -78,10 +78,11 @@ public class BinaryDotProductBenchmark {
         for (; i < upperBound; i += PREFERRED_BYTE_SPECIES.length()) {
           ByteVector va8 = ByteVector.fromArray(PREFERRED_BYTE_SPECIES, a, i);
           ByteVector vb8 = ByteVector.fromArray(PREFERRED_BYTE_SPECIES, b, i);
-          // widen to 32 bits, multiply and add
-          Vector<Integer> va32 = va8.convertShape(VectorOperators.B2I, IntVector.SPECIES_PREFERRED, 0);
-          Vector<Integer> vb32 = vb8.convertShape(VectorOperators.B2I, IntVector.SPECIES_PREFERRED, 0);
-          acc = acc.add(va32.mul(vb32));
+          Vector<Short> va16 = va8.convertShape(VectorOperators.B2S, PREFERRED_SHORT_SPECIES, 0);
+          Vector<Short> vb16 = vb8.convertShape(VectorOperators.B2S, PREFERRED_SHORT_SPECIES, 0);
+          Vector<Short> prod16 = va16.mul(vb16);
+          Vector<Integer> prod32 = prod16.convertShape(VectorOperators.S2I, IntVector.SPECIES_PREFERRED, 0);
+          acc = acc.add(prod32);
         }
         // reduce
         res += acc.reduceLanes(VectorOperators.ADD);
